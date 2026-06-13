@@ -1,4 +1,42 @@
 Attribute VB_Name = "dbHandler"
+
+'==================== Shared DB connection (performance) ====================
+' Opening an ADODB connection to the Access DB on the network share is by far
+' the most expensive step of every query. Instead of opening and closing a
+' brand-new connection per call, we keep ONE connection open for the whole
+' session and reuse it. This removes the repeated network handshake that made
+' scanning slow. If anything goes wrong the connection is dropped and a fresh
+' one is opened on the next call.
+Private mSharedConn As Object
+
+Public Function GetDBPath() As String
+    GetDBPath = "\\nltpha-nas01\PharmShare\Programme Data\Database\Replenishment.accdb"
+End Function
+
+Public Function GetSharedConn() As Object
+    On Error GoTo Reopen
+    If Not mSharedConn Is Nothing Then
+        If mSharedConn.State = 1 Then
+            Set GetSharedConn = mSharedConn
+            Exit Function
+        End If
+    End If
+Reopen:
+    On Error GoTo 0
+    Set mSharedConn = CreateObject("ADODB.Connection")
+    mSharedConn.Open "Provider=Microsoft.ACE.OLEDB.12.0;Data Source=" & GetDBPath() & ";Persist Security Info=False;"
+    Set GetSharedConn = mSharedConn
+End Function
+
+Public Sub CloseSharedConn()
+    On Error Resume Next
+    If Not mSharedConn Is Nothing Then
+        If mSharedConn.State = 1 Then mSharedConn.Close
+    End If
+    Set mSharedConn = Nothing
+    On Error GoTo 0
+End Sub
+
 Sub InsertRecord(ByVal Dt As String, ByVal GTIN As String, ByVal BinShelfCode As String, ByVal loc As String, ByVal result As String, ByVal RefillType As String, ByVal RefNo As String, ByVal status As String, ByVal by As String, ByVal Lot As String, ByVal Exp As String, ByVal PackSize As String, ByVal LastLot As String, ByVal LastExp As String)
     Dim conn As Object
     Dim rs As Object
@@ -13,10 +51,9 @@ Sub InsertRecord(ByVal Dt As String, ByVal GTIN As String, ByVal BinShelfCode As
     sql = "INSERT INTO [Record] ([Date and Time], [GTIN on Drug], [QR code on Binshelf], [Location], [Result], [Refill Type], [Ref No], [Status], [By], [Lot], [Exp], [Pack Size], [LastLot], [LastExp]) " & _
           "VALUES (#" & Dt & "#, '" & GTIN & "', '" & BinShelfCode & "', '" & loc & "', '" & result & "', '" & RefillType & "', '" & RefNo & "', '" & status & "', '" & by & "', '" & Lot & "', '" & Exp & "', '" & PackSize & "', '" & LastLot & "', '" & LastExp & "');"
     On Error GoTo ErrHandler
-    ' Create ADO connection object
-    Set conn = CreateObject("ADODB.Connection")
-    conn.Open "Provider=Microsoft.ACE.OLEDB.12.0;Data Source=" & dbPath
-   
+    ' Reuse the shared (persistent) connection
+    Set conn = GetSharedConn()
+
     ' Execute the insert into Record
     conn.Execute sql
    
@@ -37,8 +74,7 @@ Sub InsertRecord(ByVal Dt As String, ByVal GTIN As String, ByVal BinShelfCode As
         conn.Execute errSql
     End If
 Cleanup:
-    ' Close connection
-    conn.Close
+    ' Keep the shared connection open for reuse
     Set conn = Nothing
     Exit Sub
 ErrHandler:
@@ -47,10 +83,9 @@ ErrHandler:
         If rs.State = 1 Then rs.Close
         Set rs = Nothing
     End If
-    If Not conn Is Nothing Then
-        If conn.State = 1 Then conn.Close
-        Set conn = Nothing
-    End If
+    ' Drop the shared connection so a fresh one is opened next time
+    Call CloseSharedConn
+    Set conn = Nothing
 End Sub
 
 Sub Sample_Insertrecord()
@@ -316,13 +351,10 @@ Function DatabaseSQL(ByVal sql As String) As Variant
     
     ' Check if it's a SELECT query (simple check: look at first word)
     isSelect = (UCase(Left(LTrim(sql), 6)) = "SELECT")
-    
-    ' Create and open connection
-    Set conn = CreateObject("ADODB.Connection")
-    conn.Open "Provider=Microsoft.ACE.OLEDB.12.0;" & _
-              "Data Source=" & dbPath & ";" & _
-              "Persist Security Info=False;"
-    
+
+    ' Reuse the shared (persistent) connection
+    Set conn = GetSharedConn()
+
     If isSelect Then
         ' For SELECT queries, return a 2D array of results
         Set rs = CreateObject("ADODB.Recordset")
@@ -344,22 +376,21 @@ Function DatabaseSQL(ByVal sql As String) As Variant
         result = rowsAffected
     End If
 
-    conn.Close
+    ' Keep the shared connection open for reuse
     Set conn = Nothing
-    
+
     DatabaseSQL = result
     Exit Function
-    
+
 ErrHandler:
     MsgBox "Error " & err.Number & ": " & err.Description, vbCritical, "Error in DatabaseSQL"
     If Not rs Is Nothing Then
         If rs.State = 1 Then rs.Close
         Set rs = Nothing
     End If
-    If Not conn Is Nothing Then
-        If conn.State = 1 Then conn.Close
-        Set conn = Nothing
-    End If
+    ' Drop the shared connection so a fresh one is opened next time
+    Call CloseSharedConn
+    Set conn = Nothing
     ' Return empty or error indicator
     DatabaseSQL = CVErr(xlErrValue)
 End Function

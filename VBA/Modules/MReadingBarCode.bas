@@ -1,6 +1,6 @@
 Attribute VB_Name = "MReadingBarCode"
 Public Function KillSpecial(ByVal Barcode As String) As String
-    i = InStr(1, Barcode, "¡j")
+    i = InStr(1, Barcode, "ï¿½j")
     If i > 0 Then
         KillSpecial = Left(Barcode, i - 1) & Right(Barcode, Len(Barcode) - i)
     Else
@@ -11,15 +11,130 @@ End Function
 '
 Public Function ReadBarCode(ByVal Barcode As String) As Variant
     Dim result As Variant
-    result = TryCustomDecode(Barcode)
-    If UBound(result) = 2 Then
+
+    ' 1) GS1 Application-Identifier parse first. This is fast and needs NO
+    '    database lookup, so it handles the common GS1-128 / DataMatrix / QR
+    '    codes (with FNC1 separators) instantly.
+    result = DecodeGS1(Barcode)
+    If IsGS1ResultValid(result) Then
         ReadBarCode = result
-        'MsgBox "i using fastest method to read and done"
         Exit Function
     End If
-    
-    ReadBarCode = DecodeDistributor(Barcode)
-    
+
+    ' 2) Legacy positional decoders (P0-P6). Also no database lookup; handles
+    '    codes that have no FNC1 separators.
+    result = DecodeDistributor(Barcode)
+    If IsGS1ResultValid(result) Then
+        ReadBarCode = result
+        Exit Function
+    End If
+
+    ' 3) Last resort only: per-GTIN custom position map stored in the DB. This
+    '    is the single path that touches the database, used only when neither
+    '    standard method could decode the barcode.
+    ReadBarCode = TryCustomDecode(Barcode)
+End Function
+
+' Decodes a GS1 element string (GS1-128 / DataMatrix / QR) into GTIN, Lot and
+' Exp WITHOUT any database lookup. Modelled on the GS1 AI parser used in the
+' "Small-lable-printing" project.
+'   - Strips symbology identifiers: ]C1 (GS1-128), ]d2 (DataMatrix), ]Q3 (QR)
+'   - Accepts FNC1 separators as ASCII 29 or the "^" substitute
+'   - Reads fixed-length AIs and delimits variable-length AIs at FNC1
+'   AIs handled: 01/02 -> GTIN(14), 17/15 -> expiry(6, YYMMDD), 10 -> batch/lot,
+'                11/13/16 dates(6), 21 serial, 90+ internal (parsed, ignored)
+' Returns Array(GTIN, Lot, Exp) on success, or Empty if not a GS1 AI stream.
+Public Function DecodeGS1(ByVal Barcode As String) As Variant
+    Dim s As String
+    Dim fnc1 As String
+    Dim GTIN As String, lot As String, exp As String
+    Dim ai As String, val As String
+    Dim pos As Long, n As Long
+    Dim found As Boolean
+
+    fnc1 = Chr$(29)
+    s = Barcode
+
+    ' Strip a leading symbology identifier if present
+    If Left$(s, 1) = "]" And Len(s) >= 3 Then s = Mid$(s, 4)
+    ' Normalise the "^" FNC1 substitute to ASCII 29 and drop human-readable brackets
+    s = Replace(s, "^", fnc1)
+    s = Replace(s, "(", "")
+    s = Replace(s, ")", "")
+
+    ' Only trust this parser when a real FNC1 separator is present, otherwise the
+    ' boundary of a variable-length field (e.g. AI 10 lot) is ambiguous. Codes
+    ' with no separator are left to the site-tuned legacy positional decoders.
+    If InStr(s, fnc1) = 0 Then
+        DecodeGS1 = Empty
+        Exit Function
+    End If
+
+    n = Len(s)
+    pos = 1
+
+    Do While pos <= n - 1
+        ai = Mid$(s, pos, 2)
+        pos = pos + 2
+
+        Select Case ai
+            Case "01", "02"          ' GTIN, fixed 14
+                GTIN = Mid$(s, pos, 14)
+                pos = pos + 14
+                found = True
+            Case "17", "15"          ' (use-by / best-before) expiry, fixed 6 (YYMMDD)
+                exp = Mid$(s, pos, 6)
+                pos = pos + 6
+                found = True
+            Case "11", "13", "16"    ' production / packaging / sell-by dates, fixed 6
+                pos = pos + 6
+            Case "10"                ' batch / lot, variable length
+                lot = ReadVarField(s, pos, fnc1)
+                pos = pos + Len(lot)
+                If pos <= n Then If Mid$(s, pos, 1) = fnc1 Then pos = pos + 1
+                found = True
+            Case Else                ' serial (21), internal (90..99) etc. - skip value
+                val = ReadVarField(s, pos, fnc1)
+                pos = pos + Len(val)
+                If pos <= n Then If Mid$(s, pos, 1) = fnc1 Then pos = pos + 1
+        End Select
+    Loop
+
+    If Not found Or Len(GTIN) <> 14 Then
+        DecodeGS1 = Empty
+        Exit Function
+    End If
+    If Len(lot) = 0 Then lot = "na----"
+    If Len(exp) = 0 Then exp = "na----"
+
+    DecodeGS1 = Array(GTIN, lot, exp)
+End Function
+
+' Reads a variable-length GS1 field starting at startPos, stopping at the next
+' FNC1 separator or the end of the string.
+Private Function ReadVarField(ByVal s As String, ByVal startPos As Long, ByVal fnc1 As String) As String
+    Dim i As Long, n As Long
+    n = Len(s)
+    For i = startPos To n
+        If Mid$(s, i, 1) = fnc1 Then
+            ReadVarField = Mid$(s, startPos, i - startPos)
+            Exit Function
+        End If
+    Next i
+    ReadVarField = Mid$(s, startPos, n - startPos + 1)
+End Function
+
+' Validates a decoded Array(GTIN, Lot, Exp): GTIN must be 14 chars, Exp 6 chars
+' and Lot non-empty. Safe for both the GS1 array and the legacy decoder output.
+Public Function IsGS1ResultValid(ByVal result As Variant) As Boolean
+    On Error GoTo NotValid
+    If IsEmpty(result) Then Exit Function
+    If Not IsArray(result) Then Exit Function
+    If UBound(result) <> 2 Then Exit Function
+    If Len(result(0)) = 14 And Len(result(2)) = 6 And Len(result(1)) > 0 Then IsGS1ResultValid = True
+    Exit Function
+NotValid:
+    IsGS1ResultValid = False
 End Function
 
 

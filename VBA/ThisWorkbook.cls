@@ -20,7 +20,10 @@ Private Sub Workbook_BeforeClose(Cancel As Boolean)
     Dim vbsPath As String
     Dim vbsContent As String
     Dim tempPath As String
-    
+
+    ' Release the shared DB connection so the Access lock is cleared cleanly
+    Call CloseSharedConn
+
     tempPath = ThisWorkbook.FullName
     
     ' Check if this is a temp file
@@ -63,16 +66,38 @@ Private Sub Workbook_Open()
     If Not Environ("username") = "wfw325" Then
         Call CreateTemp
     End If
-    Call Update_wsRecord
+
     Call wsUnProtectAll
     Call SetQuery
     Call Update_Welcomemsg
-    ThisWorkbook.RefreshAll
     wsScannedItemReport.Visible = xlSheetVeryHidden
-    
     Call wsProtectAll
+
+    ' Show the menu straight away using the last-saved cached data, so users do
+    ' not have to wait for the network Power Query refresh before they can work.
     wsMenu.Activate
-    
+
+    ' Refresh the Power Queries in the BACKGROUND (non-blocking). The heavy
+    ' Record-table load (Update_wsRecord) is no longer done on open - the report
+    ' forms reload it themselves when they are opened.
+    Call RefreshAllInBackground
+End Sub
+
+' Kicks off a non-blocking refresh of every workbook query so the UI stays
+' responsive while the data freshens in the background. Report code that needs
+' synchronous results sets BackgroundQuery = False on its own connection.
+Private Sub RefreshAllInBackground()
+    On Error Resume Next
+    Dim conn As WorkbookConnection
+    For Each conn In ThisWorkbook.Connections
+        If conn.Type = xlConnectionTypeOLEDB Then
+            conn.OLEDBConnection.BackgroundQuery = True
+        ElseIf conn.Type = xlConnectionTypeODBC Then
+            conn.ODBCConnection.BackgroundQuery = True
+        End If
+    Next conn
+    ThisWorkbook.RefreshAll
+    On Error GoTo 0
 End Sub
 
 Private Sub SetQuery()

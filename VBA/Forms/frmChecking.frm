@@ -14,7 +14,23 @@ Attribute VB_Creatable = False
 Attribute VB_PredeclaredId = True
 Attribute VB_Exposed = False
 
+' Cached values carried between the GTIN scan and the QR scan that follows it,
+' so the same barcode is not decoded - and the same GTIN row not queried -
+' several times per check.
+Private mDecoded As Variant   ' [GTIN, Lot, Exp] from the last scanned GTIN
+Private mGtinRow As Variant   ' GTIN detail row from the last scanned GTIN
+Private mBusy As Boolean      ' re-entrancy guard for tbCodeScan_AfterUpdate
 
+' Location lookup that returns "" instead of raising when the item is missing.
+Private Function LocLookup(ByVal key As String) As String
+    Dim v As Variant
+    v = Application.VLookup(key, wsItemLoc.Range("A:C"), 3, 0)
+    If IsError(v) Then
+        LocLookup = ""
+    Else
+        LocLookup = CStr(v)
+    End If
+End Function
 
 Private Sub btnAdd_Click()
     Dim RefNum, NewRefNum, StrNum As String
@@ -140,7 +156,7 @@ Function Get_RefNum() As Long
     Dim lastRefNo As String
     Dim baseNum As Long
     
-    ' Set today¡¦s date for filtering
+    ' Set todayï¿½ï¿½s date for filtering
     today = Format(Date, "mm/dd/yyyy") ' 10/09/2025
     nextDate = Format(DateAdd("d", 1, Date), "mm/dd/yyyy") ' 10/10/2025
     
@@ -189,59 +205,66 @@ End Sub
 
 'lbBarCode
 Private Sub tbCodeScan_AfterUpdate()
+    If mBusy Then Exit Sub
+    mBusy = True
     Call wsUnProtectAll
-    Dim iRow As Long
-    If Me.tbCodeScan.value = "#ManualFill" Then
-        Me.lbGTIN.Caption = "GTINNA-Manual"
-    ElseIf Mid(Me.tbCodeScan.value, 12, 2) = "_B" And Right(Me.tbCodeScan.value, 2) = "aR" Then
-        Me.lbQRCode.Caption = LookUpItemCode(Mid(Me.tbCodeScan.value, 13))
-    ElseIf Len(Me.tbCodeScan.value) = 19 And Left(Me.tbCodeScan.value, 1) = "B" And Right(Me.tbCodeScan.value, 2) = "aR" Then
-        Me.lbQRCode.Caption = LookUpItemCode(Me.tbCodeScan.value)
-    ElseIf Len(Me.tbCodeScan.value) > 7 Then
-        Me.lbBarCode.Caption = Me.tbCodeScan.value
-        LastGTIN = Me.tbCodeScan.value
-        
 
-          Dim ResultArr As Variant
-            Dim GTIN As String
-            ResultArr = ReadBarCode(Me.tbCodeScan.value)
-            If IsEmpty(ResultArr) Then
-                Me.tbCodeScan.value = ""
-                Exit Sub
-            End If
-            
-            GTIN = ResultArr(0)
-            
-            Dim GtinResult As Variant
-            GtinResult = ShowGTINDetailsByGTIN(GTIN)
-        
-        
-        Me.lbGTIN.Caption = GtinResult(1, 1) & " - " & GtinResult(1, 2)
+    Dim code As String
+    code = Me.tbCodeScan.value
+
+    If code = "#ManualFill" Then
+        Me.lbGTIN.Caption = "GTINNA-Manual"
+    ElseIf Mid(code, 12, 2) = "_B" And Right(code, 2) = "aR" Then
+        Me.lbQRCode.Caption = LookUpItemCode(Mid(code, 13))
+    ElseIf Len(code) = 19 And Left(code, 1) = "B" And Right(code, 2) = "aR" Then
+        Me.lbQRCode.Caption = LookUpItemCode(code)
+    ElseIf Len(code) > 7 Then
+        Me.lbBarCode.Caption = code
+        LastGTIN = code
+
+        ' Decode the barcode ONCE (no DB unless a custom algo is required) and
+        ' cache it for the matching scan that follows.
+        mDecoded = ReadBarCode(code)
+        If IsEmpty(mDecoded) Then
+            Call CleanupScan
+            Exit Sub
+        End If
+
+        Dim GTIN As String
+        GTIN = mDecoded(0)
+
+        ' Fetch the GTIN detail row ONCE; reused below for the item name, the
+        ' pack size and the algo learning instead of querying the DB 3-4 times.
+        mGtinRow = ShowGTINDetailsByGTIN(GTIN)
+        Me.lbGTIN.Caption = mGtinRow(1, 1) & " - " & mGtinRow(1, 2)
     End If
-   
+
+    Dim itemCode As String
+    itemCode = Left(Me.lbGTIN.Caption, 6)
+
     ' Show Location
     If Len(Me.lbGTIN.Caption) > 10 And Right(Me.lbGTIN.Caption, 6) <> "Manual" Then
-        Me.lbMatchResult.Caption = GTINLookUpLoc(Left(Me.lbGTIN.Caption, 6), wsItemLoc.Range("A:C"), 3)
+        Me.lbMatchResult.Caption = LocLookup(itemCode)
         Me.lbMatchResult.Font.Size = 120
     Else
         Me.lbMatchResult.Caption = ""
     End If
-   
+
     ' Checking
     Dim ResultMsg As String
     If Len(Me.lbQRCode.Caption) = 6 And Len(Me.lbGTIN.Caption) > 10 Then
-        If Me.lbQRCode.Caption = Left(Me.lbGTIN.Caption, 6) Then
+        If Me.lbQRCode.Caption = itemCode Then
             ResultMsg = "Matched"
             Me.frResult.BackColor = &HC0FFC0
             Me.lbMatchResult.BackColor = &HC0FFC0
             Me.lbMatchResult.Font.Size = 120
-            Me.lbMatchResult.Caption = Application.WorksheetFunction.VLookup(Left(Me.lbGTIN.Caption, 6), wsItemLoc.Range("A:C"), 3, 0)
+            Me.lbMatchResult.Caption = LocLookup(itemCode)
         ElseIf Right(Me.lbGTIN.Caption, 6) = "Manual" Then
             ResultMsg = "Manual"
             Me.frResult.BackColor = &H80FFFF
             Me.lbMatchResult.BackColor = &H80FFFF
             Me.lbMatchResult.Font.Size = 108
-            Me.lbMatchResult.Caption = Application.WorksheetFunction.VLookup(Me.lbQRCode.Caption, wsItemLoc.Range("A:C"), 3, 0)
+            Me.lbMatchResult.Caption = LocLookup(Me.lbQRCode.Caption)
         Else
             ' set size
             ResultMsg = "Warning: Not Match"
@@ -249,52 +272,65 @@ Private Sub tbCodeScan_AfterUpdate()
             Me.frResult.BackColor = &HFF&
             Me.lbMatchResult.BackColor = &HFF&
             Me.lbMatchResult.Font.Size = 60
-            Call NotMatchAlert(Left(Me.lbGTIN.Caption, 6))
+            Call NotMatchAlert(itemCode)
         End If
-        
+
         ' Get the last Lot and Exp for the Binshelf (previous to this insert)
         Dim binshelf As String
         binshelf = Me.lbQRCode.Caption
         Dim last As Variant
         last = GetLastLotAndExp(binshelf)
-        
+
+        ' Reuse the decode from the GTIN scan rather than decoding again
+        Dim DataResult As Variant
+        If IsEmpty(mDecoded) Then
+            DataResult = ReadBarCode(LastGTIN)
+        Else
+            DataResult = mDecoded
+        End If
+
+        ' Pack size from the cached GTIN row (was a separate DB lookup)
+        Dim PackSz As String
+        PackSz = ""
+        On Error Resume Next
+        If Not IsEmpty(mGtinRow) Then
+            If mGtinRow(1, 4) <> "" Then PackSz = mGtinRow(1, 4) & "ML"
+        End If
+        On Error GoTo 0
+
+        ' Resolve the current user ONCE (the ADSI lookup is slow)
+        Dim fullName As String
+        fullName = GetUserFullName()
+
         ' Prepare parameters
         Dim param(0 To 13) As String
         param(0) = Format(Now, "dd-mmm-yyyy hh:mm")
         param(1) = Me.lbGTIN.Caption
         param(2) = Me.lbQRCode.Caption
         If ResultMsg = "Warning: Not Match" Then
-            param(3) = Application.WorksheetFunction.VLookup(Left(Me.lbGTIN.Caption, 6), wsItemLoc.Range("A:C"), 3, 0) & "(" & Application.WorksheetFunction.VLookup(Me.lbQRCode.Caption, wsItemLoc.Range("A:C"), 3, 0) & ")"
+            param(3) = LocLookup(itemCode) & "(" & LocLookup(Me.lbQRCode.Caption) & ")"
         ElseIf ResultMsg = "Manual" Then
-            param(3) = Application.WorksheetFunction.VLookup(Me.lbQRCode.Caption, wsItemLoc.Range("A:C"), 3, 0) & "(Manual)"
+            param(3) = LocLookup(Me.lbQRCode.Caption) & "(Manual)"
         Else
-            param(3) = Application.WorksheetFunction.VLookup(Left(Me.lbGTIN.Caption, 6), wsItemLoc.Range("A:C"), 3, 0)
+            param(3) = LocLookup(itemCode)
         End If
         param(4) = ResultMsg
-        If GetUserFullName() = "nltpmscclose" Then
-            param(8) = wsMem.Range("B1").value
-        ElseIf GetUserFullName() = "User" Then
+        If fullName = "nltpmscclose" Or fullName = "User" Then
             param(8) = wsMem.Range("B1").value
         Else
-            param(8) = GetUserFullName()
+            param(8) = fullName
         End If
         param(5) = Me.lbRefillType.Caption
         param(6) = Me.lb_RefNum.Caption
         param(7) = "Processing"
-        
-        Dim DataResult As Variant
-        DataResult = ReadBarCode(LastGTIN)
-        Dim PackSz As String
-        PackSz = ""
         On Error Resume Next
-        PackSz = GetSolPackSize(DataResult(0))
         param(9) = DataResult(1)
         param(10) = DataResult(2) ' exp
         param(11) = PackSz ' Pack Size
         param(12) = last(0) ' LastLot (previous)
         param(13) = last(1) ' LastExp (previous)
         On Error GoTo 0
-        
+
         ' Insert to DB
         Call InsertRecord(param(0), _
                           param(1), _
@@ -310,8 +346,7 @@ Private Sub tbCodeScan_AfterUpdate()
                           param(11), _
                           param(12), _
                           param(13))
-                          
-        'FindCodeIndex(Me.tbBarCode.value, Me.tbLot.value, Me.tbExp.value)
+
         On Error Resume Next
         If Len(last(0)) > 0 Then
             If DataResult(1) <> last(0) Then
@@ -320,18 +355,33 @@ Private Sub tbCodeScan_AfterUpdate()
             End If
         End If
         On Error GoTo 0
+
+        ' Learn a custom decode position map for this GTIN on a good match, but
+        ' only write to the DB when it actually differs from what is stored so
+        ' we are not doing a redundant network UPDATE on every matched scan.
         If ResultMsg = "Matched" Then
             If DataResult(1) <> "na----" And DataResult(2) <> "na----" And Len(DataResult(1)) > 0 And Len(DataResult(2)) > 0 Then
                 AlgoStr = "Custom"
                 result = FindCodeIndex(Me.lbBarCode.Caption, DataResult(1), DataResult(2))
                 CustomAlgoStr = "3,16," & result(0) & "," & result(1) & "," & result(2) & "," & result(3)
-                rowsAffected = PrepareUpdateSQL("GTIN", DataResult(0), Left(Me.lbGTIN.Caption, 6), ApplyKey(Left(Me.lbGTIN.Caption, 6)), "", AlgoStr, CustomAlgoStr)
-        
-                'MsgBox "i learn row:" & rowsAffected
+
+                Dim needUpdate As Boolean
+                needUpdate = True
+                On Error Resume Next
+                If Not IsEmpty(mGtinRow) Then
+                    If mGtinRow(1, 5) = AlgoStr And mGtinRow(1, 6) = CustomAlgoStr Then needUpdate = False
+                End If
+                On Error GoTo 0
+
+                If needUpdate Then
+                    rowsAffected = PrepareUpdateSQL("GTIN", DataResult(0), itemCode, ApplyKey(itemCode), "", AlgoStr, CustomAlgoStr)
+                End If
             End If
         End If
 
         LastGTIN = ""
+        mDecoded = Empty
+        mGtinRow = Empty
         Me.lbQRCode.Caption = ""
         Me.lbGTIN.Caption = ""
         Me.lbBarCode.Caption = ""
@@ -339,9 +389,19 @@ Private Sub tbCodeScan_AfterUpdate()
         Me.lbMatchResult.BackColor = &H80000014
         Me.frResult.BackColor = &H80000014
     End If
+
+    Call CleanupScan
+End Sub
+
+' Restores worksheet protection and resets the scan box. Called on every exit
+' path of tbCodeScan_AfterUpdate.
+Private Sub CleanupScan()
     Me.tbCodeScan.value = ""
+    On Error Resume Next
     Me.tbCodeScan.SetFocus
+    On Error GoTo 0
     Call wsProtectAll
+    mBusy = False
 End Sub
 
 Private Sub teststyle()
