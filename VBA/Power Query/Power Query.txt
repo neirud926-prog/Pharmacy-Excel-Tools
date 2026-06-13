@@ -1,0 +1,100 @@
+itemLocation:
+let
+    Source = Excel.Workbook(File.Contents("\\nltpha-nas01\PharmShare\Programme Data\ItemLocationXls.xls"), null, true),
+    itemLocationXls1 = Source{[Name="itemLocationXls"]}[Data],
+    #"Promoted Headers" = Table.PromoteHeaders(itemLocationXls1, [PromoteAllScalars=true]),
+    #"Changed Type" = Table.TransformColumnTypes(#"Promoted Headers",{{"Item Code", type text}, {"Drug Name", type text}, {"Base Unit", type text}, {"Trade Name", type text}, {"Strength", type text}, {"Form Description", type text}, {"Bin No.", type text}, {"Suspend", type text}, {"Pick Station No.", Int64.Type}, {"Dispensing Method", type text}, {"Max Qty", Int64.Type}, {"OP Cnt M/C (w/o Label) ID", Int64.Type}, {"Host Name", type text}}),
+    #"Filtered Rows" = Table.SelectRows(#"Changed Type", each ([#"Pick Station No."] = 1)),
+    #"Removed Columns" = Table.RemoveColumns(#"Filtered Rows",{"Base Unit", "Trade Name", "Strength", "Form Description", "Suspend", "Pick Station No.", "Dispensing Method", "Max Qty", "OP Cnt M/C (w/o Label) ID", "Host Name"})
+in
+    #"Removed Columns"
+
+MSSummary:
+let
+    Source = Excel.Workbook(File.Contents("\\nltpha-nas01\PharmShare\Programme Data\Cabinet & Mobile Shelf Label.xlsm"), null, true),
+    Summary_Sheet = Source{[Item="Summary",Kind="Sheet"]}[Data],
+    #"Changed Type" = Table.TransformColumnTypes(Summary_Sheet,{{"Column1", type text}, {"Column2", type text}, {"Column3", type text}}),
+    #"Promoted Headers" = Table.PromoteHeaders(#"Changed Type", [PromoteAllScalars=true]),
+    #"Changed Type1" = Table.TransformColumnTypes(#"Promoted Headers",{{"Item Code", type text}, {"Drug Description", type text}, {"Location", type text}}),
+    #"Sorted Rows" = Table.Sort(#"Changed Type1",{{"Item Code", Order.Ascending}})
+in
+    #"Sorted Rows"
+
+ManualFillItem:
+let
+    Source = Table.NestedJoin(Transactions,{"Item Code"},MSSummary,{"Item Code"},"MSSummary",JoinKind.LeftOuter),
+    #"Expanded MSSummary" = Table.ExpandTableColumn(Source, "MSSummary", {"Location"}, {"MSSummary.Location"}),
+    #"Filtered Rows" = Table.SelectRows(#"Expanded MSSummary", each ([MSSummary.Location] = null))
+in
+    #"Filtered Rows"
+
+Transactions:
+let
+    Source = Excel.CurrentWorkbook(){[Name="ReplenTranscation"]}[Content],
+    #"Filtered Rows" = Table.SelectRows(Source, each ([Supplying To] = "NL1-S-WKS")),
+    #"Removed Columns" = Table.RemoveColumns(#"Filtered Rows",{"Transaction Type", "Supplying From", "Supplying To", "Reference Number", "Shipment Number", "Reason", "Transaction Reference", "MG Cylinder Number", "Unit Price (HK$)", "Amount (HK$)", "Source Code", "Lot Number DFF", "Lot Expiration DFF", "Created By", "Lot Number", "Expiration Date", "Quantity in Based UOM", "Base UOM"})
+in
+    #"Removed Columns"
+
+ScannedItem:
+let
+    Source = Excel.CurrentWorkbook(){[Name="ScannedItem"]}[Content],
+    #"Changed Type" = Table.TransformColumnTypes(Source,{{"Date and Time", type datetime}, {"GTIN on Drug", type text}, {"QR code on Binshelf", type text}, {"Location", type text}, {"Result", type text}, {"Refill Type", type text}, {"Ref. No.", type text}, {"Status", type text}, {"By", type text}, {"Lot", type any}, {"Exp", type any}, {"Pack Size", type any}}),
+    #"Filtered Rows" = Table.SelectRows(#"Changed Type", each true),
+    #"Filtered Rows1" = Table.SelectRows(#"Filtered Rows", each not Text.StartsWith([Result], "W"))
+in
+    #"Filtered Rows1"
+
+ManualFillReport:
+let
+    Source = Table.NestedJoin(ManualFillItem,{"Item Code"},ScannedItem,{"QR code on Binshelf"},"ScannedItem",JoinKind.LeftOuter),
+    #"Expanded ScannedItem" = Table.ExpandTableColumn(Source, "ScannedItem", {"Date and Time", "Location", "Result", "By"}, {"ScannedItem.Date and Time", "ScannedItem.Location", "ScannedItem.Result", "ScannedItem.By"}),
+    #"Filtered Rows1" = Table.SelectRows(#"Expanded ScannedItem", each true),
+    #"Removed Columns" = Table.RemoveColumns(#"Filtered Rows1",{"MSSummary.Location"}),
+    #"Filtered Rows" = Table.SelectRows(#"Removed Columns", each ([Transaction Qty] <> null))
+in
+    #"Filtered Rows"
+
+ManualFillReport2:
+let
+    Source = Table.NestedJoin(ManualFIllReport,{"Item Code"},itemLocation,{"Item Code"},"itemLocation",JoinKind.LeftOuter),
+    #"Expanded itemLocation" = Table.ExpandTableColumn(Source, "itemLocation", {"Bin No."}, {"itemLocation.Bin No."}),
+    #"Filtered Rows" = Table.SelectRows(#"Expanded itemLocation", each ([#"itemLocation.Bin No."] <> null)),
+    #"Filtered Rows1" = Table.SelectRows(#"Filtered Rows", each not Text.StartsWith([#"itemLocation.Bin No."], "M")),
+    #"Filtered Rows2" = Table.SelectRows(#"Filtered Rows1", each not Text.Contains([Item Code], "POTA73") and not Text.Contains([Item Code], "CALA01") and not Text.Contains([Item Code], "CALA12") and not Text.Contains([Item Code], "POLY35"))
+in
+    #"Filtered Rows2"
+
+Record:
+let
+    Source = Access.Database(File.Contents("\\nltpha-nas01\PharmShare\Programme Data\Database\Replenishment.accdb"), [CreateNavigationProperties=true]),
+    _Record = Source{[Schema="",Item="Record"]}[Data],
+    #"Removed Columns" = Table.RemoveColumns(_Record,{"ID"})
+in
+    #"Removed Columns"
+
+Transactions_Qty:
+let
+    Source = Excel.CurrentWorkbook(){[Name="ReplenTranscation"]}[Content],
+    #"Filtered Rows" = Table.SelectRows(Source, each ([Supplying To] = "NL1-S-WKS")),
+    #"Removed Columns" = Table.RemoveColumns(#"Filtered Rows",{"Transaction Type", "Supplying From", "Supplying To", "Reference Number", "Shipment Number", "Reason", "Transaction Reference", "MG Cylinder Number", "Unit Price (HK$)", "Amount (HK$)", "Source Code", "Lot Number DFF", "Lot Expiration DFF", "Created By", "Lot Number", "Expiration Date", "Quantity in Based UOM", "Base UOM"}),
+    #"Grouped Rows" = Table.Group(#"Removed Columns", {"Item Code"}, {{"Qty", each List.Sum([Transaction Qty]), type number}})
+in
+    #"Grouped Rows"
+
+Error Handling Query:
+let
+    Source = Access.Database(File.Contents("\\nltpha-nas01\PharmShare\Programme Data\Database\Replenishment.accdb"), [CreateNavigationProperties=true]),
+    #"_Error Handling Query" = Source{[Schema="",Item="Error Handling Query"]}[Data],
+    #"Sorted Rows" = Table.Sort(#"_Error Handling Query",{{"ID", Order.Descending}})
+in
+    #"Sorted Rows"
+
+QNameList:
+let
+    Source = Excel.Workbook(File.Contents("\\nltpha-nas01\PharmShare\Programme Data\Namelist.xlsx"), null, true),
+    Sheet1_Table = Source{[Item="Sheet1",Kind="Table"]}[Data],
+    #"Changed Type" = Table.TransformColumnTypes(Sheet1_Table,{{"Name", type text}, {"Rank", type text}}),
+    #"Sorted Rows" = Table.Sort(#"Changed Type",{{"Rank", Order.Ascending}, {"Name", Order.Ascending}})
+in
+    #"Sorted Rows"
