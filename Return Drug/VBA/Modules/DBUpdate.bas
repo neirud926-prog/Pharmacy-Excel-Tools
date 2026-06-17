@@ -114,6 +114,21 @@ End Sub
 
 
 
+' Deferred bulk load of the non-essential locator files. Called via
+' Application.OnTime from Workbook_Open so it runs after the workbook is open
+' and responsive, rather than blocking startup. Errors are swallowed so one
+' unreachable network file cannot stop the others.
+Public Sub LoadSecondaryLocators()
+    On Error Resume Next
+    LoadEV54Locator
+    LoadEV180Locator
+    LoadTOSHOLocator
+    LoadTopupSMItemLocator
+    LoadwsPPLocator
+    LoadMSData
+    On Error GoTo 0
+End Sub
+
 Sub LoadBinshelfLocator()
     Const FILE_PATH As String = "\\nltpha-nas01\PharmShare\Programme Data\ItemLocationXls.xls"
     Dim vfilePath As String, sql As String  ' Combined Dim for brevity

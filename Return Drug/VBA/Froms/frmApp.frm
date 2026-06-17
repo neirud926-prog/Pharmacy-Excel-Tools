@@ -57,11 +57,16 @@ Private Sub UserForm_Initialize()
     Call RegisterHoverGroup(Me.btnFrReport, Me.btnlb4, Me.IconReport)
     Call RegisterHoverGroup(Me.btnFrMaintain, Me.btnlb5, Me.IconMaintenance) ' Note: Frame might be named btnFrMaintain or btnFrMaintenance
     Call RegisterHoverGroup(Me.btnFrFollowUp, Me.btnlb6, Me.IconFollowUp)
+    Call RegisterHoverGroup(Me.btnFrSurplus, Me.btnlbSurplus, Me.IconSurplus)
     ' ---------------------------------
-    
+
     Call modDatabase.LoadRecentRefNumbers(Me.PageScan_cbRefnum)
     Call modDatabase.LoadRecentRefNumbers(Me.PR_cbShelvingWS)
     Call modDatabase.LoadRecentRefNumbers(Me.CC_cbRefnum)
+
+    ' --- Home page user guide + Surplus Screening initial state ---
+    Call InitHomeGuide
+    Call ResetSurplusDisplay
 End Sub
 
 Private Sub UserForm_Terminate()
@@ -129,6 +134,10 @@ Public Sub BtnColorReset()
     Me.btnlb4.BackColor = defaultColor
     Me.btnlb5.BackColor = defaultColor
     Me.btnlb6.BackColor = defaultColor
+
+    ' New Surplus Screening panel button
+    Me.btnFrSurplus.BackColor = defaultColor
+    Me.btnlbSurplus.BackColor = defaultColor
 End Sub
 
 ' --- Top Level Buttons ---
@@ -159,6 +168,12 @@ Private Sub IconPrint_Click():        Call PannelClicked(2): End Sub
 Private Sub IconReport_Click():       Call PannelClicked(3): End Sub
 Private Sub IconMaintenance_Click():  Call PannelClicked(4): End Sub
 Private Sub IconFollowUp_Click():     Call PannelClicked(5): End Sub
+
+' --- Surplus Screening navigation (page referenced by NAME so it is safe even
+'     if the page order changes in the designer) ---
+Private Sub btnFrSurplus_Click():     Call GoToSurplus: End Sub
+Private Sub btnlbSurplus_Click():     Call GoToSurplus: End Sub
+Private Sub IconSurplus_Click():      Call GoToSurplus: End Sub
 
 ' --- Mouse Move Reset for Background Panels ---
 ' These reset the menu color and size if the mouse slips off the buttons onto the background.
@@ -765,6 +780,121 @@ Private Sub PageScan_tbUniversal_KeyDown(ByVal KeyCode As MSForms.ReturnInteger,
         If Trim(Me.PageScan_tbUniversal.Value) <> "" Then
             ProcessUniversalScan Me.PageScan_tbUniversal.Value
         End If
-        
+
     End If
+End Sub
+
+' ==============================================================================
+' 6. BUSINESS LOGIC: SURPLUS SCREENING
+' ==============================================================================
+
+' --- Navigate to the Surplus Screening page (by name, so page order is free) ---
+Private Sub GoToSurplus()
+    On Error Resume Next
+    DisableHover = True
+    Me.MutiPage.Value = Me.MutiPage.Pages("pgSurplus").Index
+    Call BtnColorReset
+    Call PannelSizeSmall
+    DoEvents
+    DisableHover = False
+    Call ResetSurplusDisplay
+    Me.Surplus_tbScan.SetFocus
+    On Error GoTo 0
+End Sub
+
+' --- Scanner finishes with Enter (13) or Tab (9): screen the item ---
+Private Sub Surplus_tbScan_KeyDown(ByVal KeyCode As MSForms.ReturnInteger, ByVal Shift As Integer)
+    If KeyCode = 13 Or KeyCode = 9 Then
+        KeyCode = 0   ' swallow the navigation keystroke
+        If Trim(Me.Surplus_tbScan.Value) <> "" Then
+            ProcessSurplusScan Me.Surplus_tbScan.Value
+        End If
+    End If
+End Sub
+
+' --- Look up the scanned item's stock-take variance and show the result ---
+Private Sub ProcessSurplusScan(ByVal scanText As String)
+    Dim itemCode As String
+    Dim variance As Double
+    Dim found As Boolean
+    Dim desc As Variant
+    Dim status As String
+
+    scanText = Trim(scanText)
+    If scanText = "" Then Exit Sub
+
+    ' OP "ABCD01" / IP "XXXXABCD01XXX" -> 6-char item code
+    itemCode = modSurplusScreening.ParseScanToItemCode(scanText)
+
+    ' Item code + description (from the local NLT item sheet)
+    desc = General.iLookup(itemCode, wsNLTItem.Range("A:B"), 2)
+    If IsEmpty(desc) Or IsError(desc) Then desc = "Unknown Item"
+    Me.Surplus_lbItem.Caption = itemCode & " - " & desc
+
+    ' Latest stock-take variance for this item
+    variance = modSurplusScreening.GetItemVariance(itemCode, found)
+
+    If Not found Then
+        ' No stock-take record at all
+        Me.Surplus_lbStatus.Caption = "NO DATA"
+        Me.Surplus_lbVariance.Caption = ""
+        Me.Surplus_frResult.BackColor = grey
+        Me.Surplus_lbStatus.ForeColor = vbWhite
+        Me.Surplus_lbVariance.ForeColor = vbWhite
+    Else
+        status = modSurplusScreening.ClassifySurplus(variance)
+        Me.Surplus_lbStatus.Caption = status
+        Me.Surplus_lbVariance.Caption = Format(variance, "+0;-0;0")   ' signed value
+
+        If status = RES_SURPLUS Then
+            Me.Surplus_frResult.BackColor = green
+            Me.Surplus_lbStatus.ForeColor = vbBlack
+            Me.Surplus_lbVariance.ForeColor = vbBlack
+        Else
+            Me.Surplus_frResult.BackColor = red
+            Me.Surplus_lbStatus.ForeColor = vbWhite
+            Me.Surplus_lbVariance.ForeColor = vbWhite
+        End If
+    End If
+
+    ' Ready for the next scan
+    Me.Surplus_tbScan.Value = ""
+    Me.Surplus_tbScan.SetFocus
+End Sub
+
+' --- Clear the Surplus result display to a neutral state ---
+Private Sub ResetSurplusDisplay()
+    On Error Resume Next
+    Me.Surplus_lbStatus.Caption = ""
+    Me.Surplus_lbVariance.Caption = ""
+    Me.Surplus_lbItem.Caption = ""
+    Me.Surplus_frResult.BackColor = grey
+    Me.Surplus_tbScan.Value = ""
+    On Error GoTo 0
+End Sub
+
+' ==============================================================================
+' 7. HOME PAGE USER GUIDE
+' ==============================================================================
+Private Sub InitHomeGuide()
+    On Error Resume Next
+    Dim g As String
+    g = "Return Drug Tool - Quick Guide" & vbCrLf & vbCrLf & _
+        "1. Data Entry" & vbCrLf & _
+        "   Scan or type the drug item code, enter the quantity, then Submit." & vbCrLf & _
+        "   Entries are grouped under today's Reference No." & vbCrLf & vbCrLf & _
+        "2. Scan / Check" & vbCrLf & _
+        "   Select a Reference No., scan the drug label then the shelf QR code to" & vbCrLf & _
+        "   verify the drug is shelved in the correct bin. Use #ManualFill for" & vbCrLf & _
+        "   damaged barcodes." & vbCrLf & vbCrLf & _
+        "3. Surplus Screening" & vbCrLf & _
+        "   Scan any drug to instantly see whether the latest stock-take shows it" & vbCrLf & _
+        "   in SHORTAGE or SURPLUS." & vbCrLf & vbCrLf & _
+        "4. Print" & vbCrLf & _
+        "   Generate the shelving list / return report for a Reference No." & vbCrLf & vbCrLf & _
+        "5. Counter Check" & vbCrLf & _
+        "   A second pharmacist signs off. The counter-signer cannot be the" & vbCrLf & _
+        "   person who shelved the items."
+    Me.Home_lbGuide.Caption = g
+    On Error GoTo 0
 End Sub
