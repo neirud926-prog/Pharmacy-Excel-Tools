@@ -16,8 +16,7 @@ Public Function SaveReturnRecord(ByVal returnType As String, ByVal itemCode As S
 
     itemCode = UCase(itemCode) ' Safety net
 
-    Set conn = CreateObject("ADODB.Connection")
-    conn.Open "Provider=Microsoft.ACE.OLEDB.12.0;Data Source=" & DB_PATH & ";"
+    Set conn = modDb.GetConn(DB_PATH)   ' reused, persistent connection
 
     ' Check if we already have this item in this Reference Number
     FindExistingRecord conn, itemCode, refNum, existingRecordId, existingQuantity, existingCount
@@ -30,12 +29,12 @@ Public Function SaveReturnRecord(ByVal returnType As String, ByVal itemCode As S
         ' New item! Set EntryCount to 1
         recordId = InsertNewReturn(conn, Now(), returnType, itemCode, quantity, refNum, locationCode, GetUsername(), "Processing", entryMethod, 1)
     End If
-    
+
     SaveReturnRecord = recordId
-    conn.Close
     Exit Function
-    
+
 ErrorHandler:
+    modDb.DropConn DB_PATH
     SaveReturnRecord = 0
 End Function
 ' --- CRUD: CREATE (Insert) a new record ---
@@ -69,13 +68,11 @@ Public Sub LogVerificationAttempt(ByVal itemCode As String, ByVal shelfHash As S
     On Error Resume Next ' If logging fails, don't stop the user's work
     
     Dim conn As Object, cmd As Object
-    Set conn = CreateObject("ADODB.Connection")
-    
-    conn.Open "Provider=Microsoft.ACE.OLEDB.12.0;Data Source=" & DB_PATH & ";"
-    
+    Set conn = modDb.GetConn(DB_PATH)   ' reused, persistent connection
+
     Set cmd = CreateObject("ADODB.Command")
     Set cmd.ActiveConnection = conn
-    
+
     cmd.CommandText = "INSERT INTO VerificationLog (ScanDateTime, ScannedBy, ScannedItemCode, ScannedShelfHash, VerificationResult, ScanMethod, TargetBin, ScannedBin, fk_ReturnID) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
     
     ' Append parameters matching your schema
@@ -98,8 +95,8 @@ Public Sub LogVerificationAttempt(ByVal itemCode As String, ByVal shelfHash As S
     End If
     
     cmd.Execute
-    
-    If conn.State = 1 Then conn.Close
+
+    ' Shared connection is left open for reuse
     Set cmd = Nothing
     Set conn = Nothing
 End Sub
@@ -422,27 +419,27 @@ Public Function GetItemCodeFromGTIN(ByVal barcodeVal As String) As String
     Dim conn As Object, rs As Object, repDbPath As String
     
     repDbPath = "\\nltpha-nas01\PharmShare\Programme Data\Database\Replenishment.accdb"
-    
-    Set conn = CreateObject("ADODB.Connection")
-    conn.Open "Provider=Microsoft.ACE.OLEDB.12.0;Data Source=" & repDbPath & ";"
-    
+
+    Set conn = modDb.GetConn(repDbPath)   ' reused, persistent connection
+
     ' SQL: Searching [Hash] column, returning [Item Code] column
     Dim sql As String
-    
+
     sql = "SELECT [Item Code] FROM GTIN WHERE [Hash] = '" & barcodeVal & "'"
-    
+
     Set rs = conn.Execute(sql)
-    
+
     If Not rs.EOF Then
         ' Accessing field with space in name
         GetItemCodeFromGTIN = CStr(rs.fields("Item Code").Value)
     Else
         GetItemCodeFromGTIN = ""
     End If
-    
-    rs.Close: conn.Close
+
+    rs.Close                ' shared connection stays open
     Exit Function
 ErrorHandler:
+    modDb.DropConn "\\nltpha-nas01\PharmShare\Programme Data\Database\Replenishment.accdb"
     GetItemCodeFromGTIN = ""
 End Function
 
@@ -513,28 +510,26 @@ Public Function GetReturnID(ByVal refNum As String, ByVal itemCode As String) As
     
     ' Default to 0 if we can't find a match
     GetReturnID = 0
-    
-    Set conn = CreateObject("ADODB.Connection")
-    conn.Open "Provider=Microsoft.ACE.OLEDB.12.0;Data Source=" & DB_PATH & ";"
-    
+
+    Set conn = modDb.GetConn(DB_PATH)   ' reused, persistent connection
+
     Set cmd = CreateObject("ADODB.Command")
     Set cmd.ActiveConnection = conn
-    
+
     ' Use parameters to prevent errors and find the exact ReturnID
     cmd.CommandText = "SELECT TOP 1 ReturnID FROM DrugReturns WHERE ReferenceNum = ? AND ItemCode = ?"
     cmd.Parameters.Append cmd.CreateParameter("p1", 200, 1, 50, refNum)   ' adVarChar
     cmd.Parameters.Append cmd.CreateParameter("p2", 200, 1, 20, itemCode) ' adVarChar
-    
+
     Set rs = cmd.Execute
-    
+
     ' If a record is found, grab the ID!
     If Not rs.EOF Then
         GetReturnID = rs.fields("ReturnID").Value
     End If
-    
-    ' Clean up
+
+    ' Clean up (shared connection stays open)
     rs.Close
-    conn.Close
     Set rs = Nothing
     Set cmd = Nothing
     Set conn = Nothing
@@ -542,6 +537,7 @@ Public Function GetReturnID(ByVal refNum As String, ByVal itemCode As String) As
 
 ErrorHandler:
     ' If something goes wrong, quietly return 0 so the scan process doesn't crash
+    modDb.DropConn DB_PATH
     GetReturnID = 0
 End Function
 
@@ -553,33 +549,30 @@ Public Sub UpdateReturnBy(ByVal returnId As Long)
     If returnId <= 0 Then Exit Sub
     
     Dim conn As Object, cmd As Object
-    Set conn = CreateObject("ADODB.Connection")
-    conn.Open "Provider=Microsoft.ACE.OLEDB.12.0;Data Source=" & DB_PATH & ";"
-    
+    Set conn = modDb.GetConn(DB_PATH)   ' reused, persistent connection
+
     Set cmd = CreateObject("ADODB.Command")
     Set cmd.ActiveConnection = conn
-    
+
     ' Update the ReturnBy column where the ID matches
     cmd.CommandText = "UPDATE DrugReturns SET ReturnBy = ? WHERE ReturnID = ?"
-    
+
     ' p1: The username (Using your existing GetUsername function)
     cmd.Parameters.Append cmd.CreateParameter("p1", 200, 1, 100, GetUsername()) ' adVarChar
     ' p2: The ReturnID
     cmd.Parameters.Append cmd.CreateParameter("p2", 3, 1, , returnId)           ' adInteger
-    
+
     cmd.Execute
-    
+
 CleanUp:
     On Error Resume Next
-    If Not conn Is Nothing Then
-        If conn.State = 1 Then conn.Close
-        Set conn = Nothing
-    End If
-    Set cmd = Nothing
+    Set cmd = Nothing       ' shared connection stays open
+    Set conn = Nothing
     Exit Sub
-    
+
 ErrorHandler:
     ' We silently resume cleanup here so a minor update error doesn't interrupt the user's scanning workflow
+    modDb.DropConn DB_PATH
     Resume CleanUp
 End Sub
 
@@ -838,20 +831,19 @@ Public Sub CheckScanProgress(ByVal returnId As Long, ByRef outRequired As Long, 
     If returnId <= 0 Then Exit Sub
     
     Dim conn As Object, rs As Object
-    Set conn = CreateObject("ADODB.Connection")
-    conn.Open "Provider=Microsoft.ACE.OLEDB.12.0;Data Source=" & DB_PATH & ";"
-    
+    Set conn = modDb.GetConn(DB_PATH)   ' reused, persistent connection
+
     ' 1. Get how many times they NEED to scan it (EntryCount)
     Set rs = conn.Execute("SELECT EntryCount FROM DrugReturns WHERE ReturnID = " & returnId)
     If Not rs.EOF Then outRequired = IIf(IsNull(rs.fields("EntryCount").Value), 1, rs.fields("EntryCount").Value)
     rs.Close
-    
+
     ' 2. Get how many times they HAVE successfully scanned it (Count of 'Match')
     Set rs = conn.Execute("SELECT COUNT(*) FROM VerificationLog WHERE fk_ReturnID = " & returnId & " AND VerificationResult = 'Match'")
     If Not rs.EOF Then outDone = rs(0).Value
     rs.Close
-    
-    conn.Close
+
+    ' Shared connection stays open for reuse
     Set rs = Nothing
     Set conn = Nothing
 End Sub
