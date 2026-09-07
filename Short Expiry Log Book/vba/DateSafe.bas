@@ -23,12 +23,14 @@ Option Explicit
 '     to *interpret* user input.
 '  3. A date is always written to a cell as a Double serial via
 '     Range.Value2, never as text, so no coercion can happen.
-'  4. Cells are given the display format "dd-mmm-yyyy" so every PC shows
-'     the same thing regardless of its regional settings.
+'  4. Cells are given the display format "[$-409]dd-mmm-yyyy" so every PC
+'     shows e.g. 01-Nov-2026 with an English month name, regardless of
+'     its regional settings or Excel display language.
 ' =====================================================================
 
-Public Const EXPIRY_NUMBER_FORMAT As String = "dd-mmm-yyyy"
-Public Const STAMP_NUMBER_FORMAT As String = "dd-mmm-yyyy hh:mm"
+' [$-409] pins the month name to English whatever the Excel display language.
+Public Const EXPIRY_NUMBER_FORMAT As String = "[$-409]dd-mmm-yyyy;@"
+Public Const STAMP_NUMBER_FORMAT As String = "[$-409]dd-mmm-yyyy hh:mm;@"
 
 ' Sanity window for an expiry date (used by ExpiryPolicyWarning).
 Public Const EXPIRY_MAX_YEARS_AHEAD As Long = 10
@@ -38,7 +40,7 @@ Public Const HOW_TO_TYPE As String = _
     "   01112026        (ddmmyyyy, 8 digits)" & vbCrLf & _
     "   01-Nov-2026     (day-month name-year)" & vbCrLf & _
     "   2026-11-01      (yyyy-mm-dd)" & vbCrLf & _
-    "   Nov-2026  or  11/2026   (month only = last day of month)"
+    "   Nov-2026  or  11/2026   (month only = 1st of that month)"
 
 ' ---------------------------------------------------------------------
 '  Month names
@@ -88,8 +90,10 @@ Public Function TryMakeDate(ByVal y As Long, ByVal m As Long, ByVal d As Long, B
     TryMakeDate = (Year(result) = y And Month(result) = m And Day(result) = d)
 End Function
 
-Public Function LastDayOfMonth(ByVal y As Long, ByVal m As Long) As Date
-    LastDayOfMonth = DateSerial(y, m + 1, 1) - 1
+' Month-only expiry ("EXP 11/2026") is stored as the 1st of that month -
+' the conservative reading chosen by the pharmacy.
+Public Function FirstDayOfMonth(ByVal y As Long, ByVal m As Long) As Date
+    FirstDayOfMonth = DateSerial(y, m, 1)
 End Function
 
 Private Function IsAllDigits(ByVal s As String) As Boolean
@@ -204,7 +208,7 @@ Public Function TryParseExpiry(ByVal txt As String, ByRef result As Date, ByRef 
                 errMsg = "'" & txt & "' has an invalid month or year."
                 Exit Function
             End If
-            result = LastDayOfMonth(y, m)
+            result = FirstDayOfMonth(y, m)
             TryParseExpiry = True
 
         ' ---- three parts ---------------------------------------------------

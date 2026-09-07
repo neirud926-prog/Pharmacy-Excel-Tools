@@ -42,7 +42,7 @@ the printed report and never get closed. 2 974 of the real dates have a day
 
 1. **Refuse ambiguity at the door.** `DateSafe.TryParseExpiry` is the only
    function allowed to interpret typed dates. It accepts
-   `01112026`, `01-Nov-2026`, `2026-11-01`, `Nov-2026` / `11/2026` (last day
+   `01112026`, `01-Nov-2026`, `2026-11-01`, `Nov-2026` / `11/2026` (first day
    of month) and a numeric `d/m/y` **only when one reading is impossible**
    (`20/6/2021`). `11/1/2026` is rejected with a message showing both
    readings and how to type it.
@@ -56,24 +56,28 @@ the printed report and never get closed. 2 974 of the real dates have a day
    hidden column; `btnSubmit` writes that serial.
 5. **Write serials, never strings.** `WriteDateCell` sets the number format
    and assigns `Value2 = CDbl(date)`. No coercion is possible.
-6. **One display format everywhere.** `dd-mmm-yyyy` on Date of Checking and
-   Use Before Date, `dd-mmm-yyyy hh:mm` on Reference, so every PC shows the
-   same thing.
+6. **One display format everywhere.** `[$-409]dd-mmm-yyyy` on Date of
+   Checking and Use Before Date, `[$-409]dd-mmm-yyyy hh:mm` on Reference.
+   The `[$-409]` locale tag pins the month name to English (`Jan`, `Feb`),
+   so every PC shows the same thing whatever its regional settings or Excel
+   display language.
 7. **All-or-nothing save.** Every staged row is validated before the first
    write; any error rolls back the rows added in that batch.
 8. **Repair is audited, not silent.** Legacy cells are listed on a `Date
    Audit` sheet with a proposed value and a reason; applying them backs up
    the sheet and writes a note into Remarks.
 
-## 3. The questions I would have grilled you on, and the answers I assumed
+## 3. Decisions
 
-Change any of these and the code needs a one-line change in the place named.
+Rows marked **confirmed** were answered by the pharmacy; the rest are my
+assumptions. Change any of these and the code needs a one-line change in the
+place named.
 
 | # | Question | Assumed answer | Where |
 |---|----------|----------------|-------|
-| 1 | Does the site read numeric dates as **day/month/year**? | Yes (HK, NLTH; column A already formatted `d/m/yyyy`). Used **only** by the repair routines to read legacy text like `20/6/2021`. The entry form never assumes it. | `TryParseExpiry(..., assumeDMY:=True)` in `DateRepair` |
-| 2 | Should `11/1/2026` be rejected outright, or resolved by a per-user setting? | Rejected. A per-user preference is exactly what caused the bug; a user on a colleague's PC would inherit the wrong one. | `TryParseExpiry` |
-| 3 | Is a **month-only** expiry (`Nov-2026`, `11/2026`) valid, and does it mean the last day of that month? | Yes; pharmaceutical convention. | `LastDayOfMonth` in `DateSafe` |
+| 1 | Does the site read numeric dates as **day/month/year**? | **Confirmed.** Used **only** by the repair routines to read legacy text like `20/6/2021`. The entry form never assumes it. Display is always an English month name, never a number. | `TryParseExpiry(..., assumeDMY:=True)` in `DateRepair` |
+| 2 | Should `11/1/2026` be rejected outright, or resolved by a per-user setting? | **Confirmed:** rejected; `20/6/2027` (only one reading possible) is accepted. A per-user preference is exactly what caused the bug. | `TryParseExpiry` |
+| 3 | Is a **month-only** expiry (`Nov-2026`, `11/2026`) valid, and which day does it mean? | **Confirmed:** valid, stored as the **first** day of that month (conservative reading). | `FirstDayOfMonth` in `DateSafe` |
 | 4 | Are 2-digit years allowed (`31/10/26`)? | Yes, as 20xx. Legacy data already contains them. | `ExpandYear` |
 | 5 | May an already-expired item be logged? | Allowed after a Yes/No warning (someone may log stock found expired). Change to a hard block if not. | `ExpiryPolicyWarning` + `btnAdd_Click` |
 | 6 | What is "implausibly far away" for short-expiry stock? | Warn above 10 years on entry; audit flags > 3 years after the checking date. | `EXPIRY_MAX_YEARS_AHEAD`, `PLAUSIBLE_MONTHS_AHEAD` |
@@ -85,6 +89,8 @@ Change any of these and the code needs a one-line change in the place named.
 | 12 | Quantity: keep writing it as typed (text), as before? | Yes, unchanged. `Qty on hand` already mixes numbers and text such as `459x12's`; out of scope here. | `btnSubmit_Click` |
 
 ## 4. Is Excel the right place to hold the data?
+
+**Decision (confirmed): Excel now, Access as a separate follow-up.**
 
 Excel is not a database; a cell has no type, so anyone can type `N/A` or
 `5/DEC/206` into the expiry column and the sheet cannot stop them. The
@@ -160,8 +166,9 @@ right of `cbUBDate` if you want to control where the preview sits.
 * Type `11/1/2026` → rejected, message names both readings.
 * Type `01112026` → box becomes `01-Nov-2026`, preview green.
 * Type `20/6/2027` → accepted as 20-Jun-2027 (only one reading possible).
-* Type `Nov-2026` → `30-Nov-2026`.
+* Type `Nov-2026` → `01-Nov-2026`.
 * Type `01012020` → warning "already in the past", *No* keeps the row out.
-* Add two rows, Save → both rows show `dd-mmm-yyyy`, cells are numeric
+* Add two rows, Save → both rows show `01-Nov-2026` style with an English
+  month even on a Chinese-language Excel, cells are numeric
   (`=ISNUMBER(F…)` is TRUE) on **both** a d/m/y and an m/d/y PC.
 * Print report → Reference column shows `dd-mmm-yyyy hh:mm`, `=ISNUMBER` TRUE.
