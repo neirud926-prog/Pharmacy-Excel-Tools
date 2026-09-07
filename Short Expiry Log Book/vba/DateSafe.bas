@@ -124,8 +124,8 @@ End Function
 '     01-Nov-2026         d Mon y      (Mon = 3+ letters, y = 2 or 4 digits)
 '     Nov-01-2026         Mon d y
 '     2026-11-01          yyyy-mm-dd
-'     Nov-2026            Mon yyyy      -> last day of month
-'     11/2026, 2026-11    mm/yyyy, yyyy-mm -> last day of month
+'     Nov-2026            Mon yyyy      -> 1st day of month
+'     11/2026, 2026-11    mm/yyyy, yyyy-mm -> 1st day of month
 '     20/6/2021           numeric d/m/y or m/d/y ONLY when one reading is
 '                         impossible (a part > 12).  "11/1/2026" is rejected.
 '
