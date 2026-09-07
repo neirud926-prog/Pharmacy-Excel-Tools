@@ -78,14 +78,15 @@ place named.
 | 1 | Does the site read numeric dates as **day/month/year**? | **Confirmed.** Used **only** by the repair routines to read legacy text like `20/6/2021`. The entry form never assumes it. Display is always an English month name, never a number. | `TryParseExpiry(..., assumeDMY:=True)` in `DateRepair` |
 | 2 | Should `11/1/2026` be rejected outright, or resolved by a per-user setting? | **Confirmed:** rejected; `20/6/2027` (only one reading possible) is accepted. A per-user preference is exactly what caused the bug. | `TryParseExpiry` |
 | 3 | Is a **month-only** expiry (`Nov-2026`, `11/2026`) valid, and which day does it mean? | **Confirmed:** valid, stored as the **first** day of that month (conservative reading). | `FirstDayOfMonth` in `DateSafe` |
-| 4 | Are 2-digit years allowed (`31/10/26`)? | Yes, as 20xx. Legacy data already contains them. | `ExpandYear` |
-| 5 | May an already-expired item be logged? | Allowed after a Yes/No warning (someone may log stock found expired). Change to a hard block if not. | `ExpiryPolicyWarning` + `btnAdd_Click` |
+| 4 | Are 2-digit years allowed (`31/10/26`)? | **Confirmed:** yes, as 20xx. Legacy data already contains them. | `ExpandYear` |
+| 5 | May an already-expired item be logged? | **Confirmed:** allowed after a Yes/No warning (stock found expired on the shelf). | `ExpiryPolicyWarning` + `btnAdd_Click` |
 | 6 | What is "implausibly far away" for short-expiry stock? | Warn above 10 years on entry; audit flags > 3 years after the checking date. | `EXPIRY_MAX_YEARS_AHEAD`, `PLAUSIBLE_MONTHS_AHEAD` |
-| 7 | Can historic rows be auto-corrected? | Only when the cell is *provably* wrong: text → date, or expiry before the checking date whose day/month swap lands within 3 years. Everything else is listed with `Apply = N` for a human. | `AuditRecordDates` |
+| 7 | Can historic rows be auto-corrected? | **Confirmed:** only when the cell is *provably* wrong: text → date, or expiry before the checking date whose day/month swap lands within 3 years. Everything else is listed with `Apply = N` for a human. | `AuditRecordDates` |
 | 8 | Same item + lot recorded with two dates that are each other's swap – which is right? | Cannot be decided by code; listed with `Apply = N` and both row numbers. (45 such rows today.) | `RowsWithDate` |
 | 9 | Is the checking date trustworthy? | Yes when it is a real date (`Date` was assigned as a Date). 411 text values were typed by hand and are converted like column F. | audit, column A branch |
 | 10 | Should the repair be reversible? | Yes: backup sheet `Record_bak_yyyymmdd_hhnn` + a note in Remarks per changed cell. | `ApplyDateAudit` |
 | 11 | Should the form get separate Day / Month / Year controls or a calendar picker? | Not needed: strict parsing + preview gives the same guarantee with no `.frx` changes. A design-time label named `lbDatePreview` is used if you add one; otherwise the code creates it at run time to the right of the date box. | `SetupPreviewLabel` |
+| 13 | Item code not in the ItemLocation list? | **Confirmed:** warn, save on Yes with a blank Item Name. | `btnAdd_Click` |
 | 12 | Quantity: keep writing it as typed (text), as before? | Yes, unchanged. `Qty on hand` already mixes numbers and text such as `459x12's`; out of scope here. | `btnSubmit_Click` |
 
 ## 4. Is Excel the right place to hold the data?
