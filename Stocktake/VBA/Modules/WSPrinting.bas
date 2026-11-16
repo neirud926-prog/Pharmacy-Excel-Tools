@@ -1,36 +1,29 @@
 Attribute VB_Name = "WSPrinting"
 Sub Print5itemsWorkSheet()
     Dim result As Variant
-    Dim nextBin As String
     Dim i As Long
     
-    ' 1. Get the next bin shelf (already filters Type = 'Daily')
-    nextBin = GetNextBinShelf()
-    
-    If nextBin = "" Then
-        MsgBox "No next Daily BinShelf found.", vbExclamation
-        Exit Sub
-    End If
-    
-    ' 2. Get the current + next 4 rows (total 5)
-    result = LookupRows(wsBinShelfLocator.Range("A1").CurrentRegion, _
-        2, _
-        nextBin, _
-        5 _
-    )
+    ' 1. Next 5 items NOT yet counted in the current Daily cycle, in bin order
+    '    (BinCycle module). Items already counted in this cycle - including
+    '    off-sequence entries - are never printed again until the cycle is done.
+    result = BinCycle.GetNextCycleItems(5)
     
     If IsEmpty(result) Then
-        MsgBox "Not enough consecutive BinShelves found starting from " & nextBin, vbExclamation
+        MsgBox "No next Daily BinShelf found." & vbCrLf & BinCycle.GetCycleSummary(), vbExclamation
         Exit Sub
     End If
     
-    ' 3. Write the 5 ItemCodes to C3:C7 (row 3 to 7)
+    ' 2. Write the ItemCodes to C3:C7 (row 3 to 7); clear unused rows
     '    ? This will trigger Worksheet_Change ? lookups happen automatically
-    For i = 1 To UBound(result, 1)           ' number of rows returned
-        wsStocktakeSheet.Cells(2 + i, 3).Value = result(i, 1)   ' ItemCode = column 1 in result
+    For i = 1 To 5
+        If i <= UBound(result, 1) Then
+            wsStocktakeSheet.Cells(2 + i, 3).Value = result(i, 1)   ' ItemCode
+        Else
+            wsStocktakeSheet.Cells(2 + i, 3).ClearContents
+        End If
     Next i
     
-    ' 4. Set date in G1
+    ' 3. Set date in G1
     wsStocktakeSheet.Range("G1").Value = Format(Date, "dd-mmm-yyyy")
     
 
@@ -43,5 +36,5 @@ Sub Print5itemsWorkSheet()
 End Sub
 
 Sub test333()
-    MsgBox GetNextBinShelf()
+    MsgBox "Next bin: " & GetNextBinShelf() & vbCrLf & BinCycle.GetCycleSummary()
 End Sub

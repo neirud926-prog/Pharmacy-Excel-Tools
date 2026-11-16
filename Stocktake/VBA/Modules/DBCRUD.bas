@@ -4,102 +4,23 @@ Option Explicit
 
 
 '====================================================================
-' GetNextBinShelf – Fetches the latest BinShelf from Access DB "Record" table
-'                   (by max Date, fallback to max ID if dates tie),
-'                   then finds/returns the next sequential BinShelf from
-'                   wsBinShelfLocator (assumes sorted ascending in col B).
-'====================================================================
-' Assumptions:
-' - DB path: "\\nltpha-nas01\PharmShare\Programme Data\Database\Stocktake.accdb"
-' - wsBinShelfLocator: Col A = ItemCode, Col B = BinShelf (sorted ASC by B).
-' - Latest record: By max "Date" (Date field); ties broken by max ID.
-' - Returns: Next BinShelf as String (e.g., "A02"); "" if none/next not found.
-' - Error handling: Returns "" on failures (e.g., DB access, no records).
-'====================================================================
-' Design Pattern: Repository Pattern (DB access isolated); Binary Search for
-'                 worksheet lookup (O(log n) perf on sorted data – fastest).
-' Performance: ADO query ~0.1-0.5s (DB size dependent); Binary search <0.01s.
-' Cleanliness: Self-contained, explicit declarations, early exits, no globals.
-' Professional: Late-bound ADO (portable, no refs); defensive validation.
+' GetNextBinShelf - BinShelf of the next item not yet counted in the
+'                   current Daily cycle (see BinCycle module).
+'                   Returns "" if unavailable.
+'
+' FIX 16-Nov-2026: previously returned the bin AFTER the latest saved Daily
+' record, so any off-sequence entry moved the rotation (2A8A on 04-Sep-2026
+' skipped all 1*, P*, R*, S*, T* and MF*+ bins). The latest record no longer
+' drives the sequence.
 '====================================================================
 Public Function GetNextBinShelf() As String
-    Dim conn As Object          ' ADODB.Connection
-    Dim rs   As Object          ' ADODB.Recordset
-    Dim sql  As String
-    Dim dbPath As String
-    Dim latestBinShelf As String
-    Dim ws As Worksheet
-    Dim binCol As Long          ' BinShelf column (B = 2)
-    Dim lastRow As Long
-    Dim binRange As Range
-    Dim foundRow As Long
-    Dim nextBinShelf As String
-    
-    On Error GoTo ErrorHandler
-    
-    '--- 1. Setup ---------------------------------------------------
-    dbPath = "\\nltpha-nas01\PharmShare\Programme Data\Database\Stocktake.accdb"
-    Set ws = wsBinShelfLocator
-    binCol = 2                           ' BinShelf in column B
-    
-    ' Validate worksheet has data (at least header + 1 row)
-    lastRow = ws.Cells(ws.Rows.Count, binCol).End(xlUp).Row
-    If lastRow < 2 Then GoTo ErrorHandler
-    
-    '--- 2. Get latest BinShelf where Type = 'Daily' ---------------
-    Set conn = CreateObject("ADODB.Connection")
-    conn.Open "Provider=Microsoft.ACE.OLEDB.12.0;Data Source=" & dbPath & _
-              ";Persist Security Info=False;"
-    
-    sql = "SELECT TOP 1 [BinShelf] " & _
-          "FROM [Record] " & _
-          "WHERE Type = 'Daily' " & _
-          "ORDER BY [RecDate] DESC, [ID] DESC"
-    
-    Set rs = conn.Execute(sql)
-    
-    If Not rs.EOF Then
-        latestBinShelf = Trim(rs.fields("BinShelf").Value & "")
-    End If
-    
-    ' Early cleanup
-    If Not rs Is Nothing Then
-        If rs.State = 1 Then rs.Close
-        Set rs = Nothing
-    End If
-    If Not conn Is Nothing Then
-        If conn.State = 1 Then conn.Close
-        Set conn = Nothing
-    End If
-    
-    If latestBinShelf = "" Then GoTo ErrorHandler   ' no Daily records
-    
-    '--- 3. Find position in sorted list (wsBinShelfLocator) --------
-    Set binRange = ws.Range(ws.Cells(2, binCol), ws.Cells(lastRow, binCol))
-    foundRow = Application.Match(latestBinShelf, binRange, 0)   ' exact match
-    
-    If IsError(foundRow) Then GoTo ErrorHandler     ' not found in sheet
-    
-    foundRow = foundRow + 1   ' convert to absolute row number
-    
-    '--- 4. Get next (with wrap-around) -----------------------------
-    If foundRow < lastRow Then
-        ' Normal case: next row exists
-        nextBinShelf = Trim(ws.Cells(foundRow + 1, binCol).Value & "")
+    Dim items As Variant
+    items = BinCycle.GetNextCycleItems(1)
+    If IsEmpty(items) Then
+        GetNextBinShelf = ""
     Else
-        ' Wrap-around: return first item (row 2)
-        nextBinShelf = Trim(ws.Cells(2, binCol).Value & "")
+        GetNextBinShelf = items(1, 2)
     End If
-    
-    ' If first item is empty (edge case), return ""
-    If nextBinShelf = "" Then nextBinShelf = ""
-    
-    GetNextBinShelf = nextBinShelf
-    Exit Function
-
-ErrorHandler:
-    GetNextBinShelf = ""
-    ' Optional logging: Debug.Print "GetNextBinShelf error: " & Err.Description
 End Function
 
 Public Sub SaveListViewToAccess(frm As frmApp)
@@ -111,6 +32,9 @@ Public Sub SaveListViewToAccess(frm As frmApp)
     
     recordType = Trim(frm.btnChangeType.Caption)
     If recordType <> "Daily" And recordType <> "Annual" Then recordType = "Daily"
+    
+    Dim cyclesBefore As Long: cyclesBefore = -1
+    If recordType = "Daily" Then cyclesBefore = BinCycle.GetCyclesCompleted()
     
     Set conn = CreateObject("ADODB.Connection")
     conn.Open "Provider=Microsoft.ACE.OLEDB.12.0;Data Source=" & dbPath & ";"
@@ -159,6 +83,8 @@ Public Sub SaveListViewToAccess(frm As frmApp)
         Next i
         MsgBox .ListItems.Count & " record(s) saved successfully!", vbInformation
     End With
+    
+    BinCycle.NotifyIfCycleCompleted cyclesBefore
     
 CleanUp:
     Set cmd = Nothing
