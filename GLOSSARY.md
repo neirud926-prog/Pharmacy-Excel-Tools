@@ -17,7 +17,14 @@ The rolling count of a few BinShelfLocator items each day (records with Type `Da
 _Avoid_: Daily check, cycle count
 
 **Annual Stock Take**:
-The once-a-year full count (records with Type `Annual`). It does not count towards the Daily Cycle.
+The once-a-year full count (records with Type `Annual`). It has its own Annual Cycle and never counts towards the Daily Cycle.
+
+**Annual Year**:
+The window 1 June to 31 May of the next year. Every Annual record dated in it belongs to that year's Annual Stock Take.
+_Avoid_: Financial year, calendar year
+
+**Annual Cycle**:
+The Annual Stock Take of one Annual Year. It is complete when every BinShelfLocator item has an Annual count dated in that Annual Year. Daily counts never count towards it.
 
 **Daily Cycle**:
 One complete pass of the Daily Stock Take in which every BinShelfLocator item has at least one Daily count. The next cycle starts only after the current one is complete.

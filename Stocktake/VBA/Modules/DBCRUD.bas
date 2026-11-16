@@ -35,6 +35,8 @@ Public Sub SaveListViewToAccess(frm As frmApp)
     
     Dim cyclesBefore As Long: cyclesBefore = -1
     If recordType = "Daily" Then cyclesBefore = BinCycle.GetCyclesCompleted()
+    Dim annualBefore As Long: annualBefore = -1
+    If recordType = "Annual" Then annualBefore = BinCycle.GetAnnualRemaining()
     
     Set conn = CreateObject("ADODB.Connection")
     conn.Open "Provider=Microsoft.ACE.OLEDB.12.0;Data Source=" & dbPath & ";"
@@ -85,6 +87,7 @@ Public Sub SaveListViewToAccess(frm As frmApp)
     End With
     
     BinCycle.NotifyIfCycleCompleted cyclesBefore
+    BinCycle.NotifyIfAnnualCompleted annualBefore
     
 CleanUp:
     Set cmd = Nothing

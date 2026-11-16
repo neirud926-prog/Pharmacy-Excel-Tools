@@ -9,5 +9,5 @@ The Daily Stock Take used to pick the bin after the latest saved Daily record. O
 
 ## Consequences
 
-- Annual records do not count towards the Daily Cycle.
+- Annual records do not count towards the Daily Cycle. The Annual Cycle is tracked separately, one per Annual Year (1 Jun – 31 May). The start month is the `ANNUAL_START_MONTH` constant in `BinCycle.bas`.
 - An item added to BinShelfLocator mid-cycle has to be counted before that cycle can complete. Items removed from BinShelfLocator are ignored.

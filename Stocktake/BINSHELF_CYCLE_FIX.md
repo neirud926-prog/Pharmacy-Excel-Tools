@@ -44,19 +44,33 @@ The rule is recorded in ADR `docs/adr/0001-stocktake-daily-cycle-by-coverage.md`
 * An **off-sequence entry** counts that item as done, but it cannot move or skip the sequence.
 * **Print 5 items** prints the next 5 uncounted items. Items already counted in this cycle are never reprinted, and if fewer than 5 remain it prints what is left.
 * When a Daily save finishes the cycle, a message reports it, and the next print starts a new cycle from the first bin.
-* Annual records are ignored. No database change is needed.
+* Annual records are ignored by the Daily Cycle; they have their own Annual Cycle (see below). No database change is needed.
 
 Expected after the fix: the next print is **1A2B, 1A3A, 1A3B, 1A4A, 1A4B**. The current cycle (started 04-May-2026) has 489 of 705 items counted and 216 to go, about 43 sessions at 5 items each.
+
+## Annual Cycle (added 16-Nov-2026)
+
+The Annual Stock Take is a **separate cycle**. Annual and Daily counts never count towards each other.
+
+* **Annual Year**: 1 Jun to 31 May of the next year. The start month is the `ANNUAL_START_MONTH` constant (currently 6, provisional).
+* **Complete**: every BinShelfLocator item has an Annual count dated in that Annual Year. Annual items that are not in BinShelfLocator are ignored; only 6 of the 671 counted fall in this group.
+* **2025-26 Annual Year** (the Annual Stock Take of 06-Feb to 18-Mar-2026): **665 of 705 items counted, 40 not counted.** The missing items are 12 M*, 10 T*, 4 1*, 4 R* and 10 others. The list is in `Annual_Not_Counted_2025-26.csv`.
+* **2026-27 Annual Year** (current): no Annual records yet, so 0 of 705.
+* When an Annual save brings the remaining count to zero, a message reports that the Annual Stock Take is complete.
+* Macros:
+  * `BinCycle.ShowAnnualStatus` shows the current and the previous Annual Year.
+  * `BinCycle.ReportAnnualUncounted DateSerial(2026, 3, 1)` lists the items not yet counted in an Annual Year on the Report sheet.
+* "Print 5 items" is unchanged and stays Daily-only.
 
 ### Changed files (re-import into `Stocktake.xlsm`)
 
 | File | Change |
 |------|--------|
-| `VBA/Modules/BinCycle.bas` | **New.** Cycle replay, `GetNextCycleItems`, `GetCyclesCompleted`, `GetCycleSummary`, `NotifyIfCycleCompleted`. |
-| `VBA/Modules/DBCRUD.bas` | `GetNextBinShelf` delegates to BinCycle. `SaveListViewToAccess` shows a message when a Daily save completes a cycle. |
+| `VBA/Modules/BinCycle.bas` | **New.** Daily: `GetNextCycleItems`, `GetCyclesCompleted`, `GetCycleSummary`, `NotifyIfCycleCompleted`. Annual: `AnnualYearStart`, `GetAnnualUncountedItems`, `GetAnnualRemaining`, `GetAnnualSummary`, `NotifyIfAnnualCompleted`, `ReportAnnualUncounted`, `ShowAnnualStatus`. |
+| `VBA/Modules/DBCRUD.bas` | `GetNextBinShelf` delegates to BinCycle. `SaveListViewToAccess` shows a message when a Daily save completes the Daily Cycle, or an Annual save completes the Annual Cycle. |
 | `VBA/Modules/WSPrinting.bas` | `Print5itemsWorkSheet` prints the next 5 uncounted items and clears unused rows. `test333` shows the cycle progress. |
 
-To install: in the VBA editor, import `BinCycle.bas`, then remove and re-import `DBCRUD.bas` and `WSPrinting.bas`, and save. Run `test333` to check the result: it should show "Next bin: 1A2B" and "489 of 705".
+To install: in the VBA editor, import `BinCycle.bas`, then remove and re-import `DBCRUD.bas` and `WSPrinting.bas`, and save. Run `test333` to check the result: it should show "Next bin: 1A2B" and "489 of 705". Also run `BinCycle.ShowAnnualStatus`: it should show 0 of 705 for 2026-27 and 665 of 705 for 2025-26.
 
 ### Not verified here
 
