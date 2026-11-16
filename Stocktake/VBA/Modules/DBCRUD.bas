@@ -33,6 +33,7 @@ Public Sub SaveListViewToAccess(frm As frmApp)
     recordType = Trim(frm.btnChangeType.Caption)
     If recordType <> "Daily" And recordType <> "Annual" Then recordType = "Daily"
     
+    Dim saved As Boolean
     Dim cyclesBefore As Long: cyclesBefore = -1
     If recordType = "Daily" Then cyclesBefore = BinCycle.GetCyclesCompleted()
     Dim annualBefore As Long: annualBefore = -1
@@ -85,9 +86,7 @@ Public Sub SaveListViewToAccess(frm As frmApp)
         Next i
         MsgBox .ListItems.Count & " record(s) saved successfully!", vbInformation
     End With
-    
-    BinCycle.NotifyIfCycleCompleted cyclesBefore
-    BinCycle.NotifyIfAnnualCompleted annualBefore
+    saved = True
     
 CleanUp:
     Set cmd = Nothing
@@ -95,6 +94,13 @@ CleanUp:
     Set conn = Nothing
     
     ExportFilteredData "RefNum = '" & refNumVal & "'"
+    
+    ' Cycle checks read through a new connection, so run them only after the
+    ' save connection is closed (ACE may not have flushed the inserts before).
+    If saved Then
+        BinCycle.NotifyIfCycleCompleted cyclesBefore
+        BinCycle.NotifyIfAnnualCompleted annualBefore
+    End If
     Application.ScreenUpdating = True
     
     

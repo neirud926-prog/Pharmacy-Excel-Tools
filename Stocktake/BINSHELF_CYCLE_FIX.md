@@ -59,14 +59,14 @@ The Annual Stock Take is a **separate cycle**. Annual and Daily counts never cou
 * When an Annual save brings the remaining count to zero, a message reports that the Annual Stock Take is complete.
 * Macros:
   * `BinCycle.ShowAnnualStatus` shows the current and the previous Annual Year.
-  * `BinCycle.ReportAnnualUncounted DateSerial(2026, 3, 1)` lists the items not yet counted in an Annual Year on the Report sheet.
+  * `ReportAnnualUncountedThisYear` and `ReportAnnualUncountedLastYear` (in the Alt+F8 list) put the items not yet Annual-counted on the Report sheet. `ReportAnnualUncounted <any date>` does the same for any Annual Year.
 * "Print 5 items" is unchanged and stays Daily-only.
 
 ### Changed files (re-import into `Stocktake.xlsm`)
 
 | File | Change |
 |------|--------|
-| `VBA/Modules/BinCycle.bas` | **New.** Daily: `GetNextCycleItems`, `GetCyclesCompleted`, `GetCycleSummary`, `NotifyIfCycleCompleted`. Annual: `AnnualYearStart`, `GetAnnualUncountedItems`, `GetAnnualRemaining`, `GetAnnualSummary`, `NotifyIfAnnualCompleted`, `ReportAnnualUncounted`, `ShowAnnualStatus`. |
+| `VBA/Modules/BinCycle.bas` | **New.** Daily: `GetNextCycleItems`, `GetCyclesCompleted`, `GetCycleSummary`, `NotifyIfCycleCompleted`. Annual: `AnnualYearStart`, `GetAnnualUncountedItems`, `GetAnnualRemaining`, `GetAnnualSummary`, `NotifyIfAnnualCompleted`, `ReportAnnualUncounted` (+ `ThisYear`/`LastYear`), `ShowAnnualStatus`. |
 | `VBA/Modules/DBCRUD.bas` | `GetNextBinShelf` delegates to BinCycle. `SaveListViewToAccess` shows a message when a Daily save completes the Daily Cycle, or an Annual save completes the Annual Cycle. |
 | `VBA/Modules/WSPrinting.bas` | `Print5itemsWorkSheet` prints the next 5 uncounted items and clears unused rows. `test333` shows the cycle progress. |
 

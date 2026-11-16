@@ -371,3 +371,12 @@ Public Sub ShowAnnualStatus()
     MsgBox GetAnnualSummary(Date) & vbCrLf & vbCrLf & _
            GetAnnualSummary(DateAdd("yyyy", -1, Date)), vbInformation
 End Sub
+
+' No-argument wrappers so the reports appear in the Alt+F8 macro list.
+Public Sub ReportAnnualUncountedThisYear()
+    ReportAnnualUncounted Date
+End Sub
+
+Public Sub ReportAnnualUncountedLastYear()
+    ReportAnnualUncounted DateAdd("yyyy", -1, Date)
+End Sub
