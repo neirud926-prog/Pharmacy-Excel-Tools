@@ -9,7 +9,7 @@ The physical shelf location code of an item, e.g. `5C4D` or `TD9A`. The bin orde
 _Avoid_: Bin No, location, shelf
 
 **BinShelfLocator**:
-The master list of items covered by the Daily Stock Take (manual-dispensing items, excluding C* and D* bins), sorted by BinShelf.
+The master list of items covered by the Daily Stock Take (manual-dispensing items, excluding C*, D* and R5* bins, which are not stock-takable), sorted by BinShelf.
 _Avoid_: Locator list, bin list
 
 **Daily Stock Take**:

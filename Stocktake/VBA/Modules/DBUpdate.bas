@@ -120,8 +120,10 @@ Sub LoadBinshelfLocator()
     
     vfilePath = FILE_PATH
     
+    ' Excluded: C* and D* bins, and R5* bins (not stock-takable).
     sql = "SELECT [Item Code], [Bin No#] FROM [itemLocationXls$] " & _
           "WHERE [Dispensing Method] = 'Manual' AND LEFT([Bin No#], 1) NOT IN ('C', 'D') " & _
+          "AND LEFT([Bin No#], 2) <> 'R5' " & _
           "ORDER BY [Bin No#] ASC"
     
     Call LoadFileToWorksheet(vfilePath, wsBinShelfLocator, , sql)
